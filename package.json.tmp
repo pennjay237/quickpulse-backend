@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "qrcode": "^1.5.3",
+    "simple-peer": "^9.11.1"
+  }
+}

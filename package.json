@@ -103,6 +103,7 @@
     "postgres-interval": "^1.2.0",
     "proxy-addr": "^2.0.7",
     "pstree.remy": "^1.1.8",
+    "qrcode": "^1.5.4",
     "qs": "^6.15.0",
     "range-parser": "^1.2.1",
     "raw-body": "^3.0.2",
@@ -118,9 +119,11 @@
     "side-channel-list": "^1.0.0",
     "side-channel-map": "^1.0.1",
     "side-channel-weakmap": "^1.0.2",
+    "simple-peer": "^9.11.1",
     "simple-update-notifier": "^2.0.0",
     "socket.io": "^4.8.3",
     "socket.io-adapter": "^2.5.6",
+    "socket.io-client": "^4.8.3",
     "socket.io-parser": "^4.2.5",
     "split2": "^4.2.0",
     "statuses": "^2.0.2",
@@ -138,7 +141,6 @@
     "ws": "^8.18.3",
     "xtend": "^4.0.2"
   },
-  "devDependencies": {},
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
