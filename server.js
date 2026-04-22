@@ -39,6 +39,9 @@ app.use('/api/auth', require('./src/routes/authRoutes'));
 // Session Routes
 app.use('/api/sessions', require('./src/routes/sessionRoutes'));
 
+// Poll Routes
+app.use('/api/polls', require('./src/routes/pollRoutes'));
+
 // Basic test route
 app.get('/', (req, res) => {
   res.json({ 
@@ -66,12 +69,101 @@ app.get('/api/test-db', async (req, res) => {
   }
 });
 
-// ============= SOCKET.IO =============
+// ============= SOCKET.IO WITH VOICE SIGNALING =============
+// Store active voice rooms and participants
+const voiceRooms = new Map();
+
 io.on('connection', (socket) => {
   console.log('✅ New client connected:', socket.id);
 
+  // Join session room (for participants)
+  socket.on('join-session', (sessionCode) => {
+    socket.join(`session-${sessionCode}`);
+    console.log(`Socket ${socket.id} joined session-${sessionCode}`);
+  });
+
+  // Join host room (for hosts)
+  socket.on('join-host', (hostId) => {
+    socket.join(`host-${hostId}`);
+    console.log(`Socket ${socket.id} joined host-${hostId}`);
+  });
+
+  // Join voice room (for voice calls)
+  socket.on('join-voice-room', ({ roomName, userId, userName }) => {
+    socket.join(roomName);
+    
+    if (!voiceRooms.has(roomName)) {
+      voiceRooms.set(roomName, new Map());
+    }
+    
+    const room = voiceRooms.get(roomName);
+    room.set(socket.id, { userId, userName });
+    
+    // Notify others in the room
+    socket.to(roomName).emit('user-joined', {
+      userId,
+      userName,
+      socketId: socket.id
+    });
+    
+    // Send existing participants to new user
+    const participants = Array.from(room.entries()).map(([id, data]) => ({
+      socketId: id,
+      userId: data.userId,
+      userName: data.userName
+    }));
+    
+    socket.emit('room-participants', participants);
+    console.log(`User ${userName} joined voice room: ${roomName}`);
+  });
+
+  // WebRTC signaling for voice calls
+  socket.on('signal', ({ to, signal, from }) => {
+    io.to(to).emit('signal', {
+      signal,
+      from: socket.id
+    });
+  });
+
+  // Leave voice room
+  socket.on('leave-voice-room', ({ roomName }) => {
+    socket.leave(roomName);
+    
+    if (voiceRooms.has(roomName)) {
+      const room = voiceRooms.get(roomName);
+      const user = room.get(socket.id);
+      room.delete(socket.id);
+      
+      if (room.size === 0) {
+        voiceRooms.delete(roomName);
+      }
+      
+      socket.to(roomName).emit('user-left', {
+        socketId: socket.id,
+        userId: user?.userId
+      });
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('❌ Client disconnected:', socket.id);
+    
+    // Remove from all voice rooms
+    for (const [roomName, participants] of voiceRooms.entries()) {
+      if (participants.has(socket.id)) {
+        const user = participants.get(socket.id);
+        participants.delete(socket.id);
+        socket.to(roomName).emit('user-left', {
+          socketId: socket.id,
+          userId: user?.userId
+        });
+        
+        if (participants.size === 0) {
+          voiceRooms.delete(roomName);
+        }
+        break;
+      }
+    }
   });
 });
 
