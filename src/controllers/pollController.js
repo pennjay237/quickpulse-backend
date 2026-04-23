@@ -1,4 +1,3 @@
-// Create a poll (draft)
 exports.createPoll = async (req, res) => {
   try {
     const { sessionId, question, type, options } = req.body;
@@ -27,7 +26,6 @@ exports.createPoll = async (req, res) => {
   }
 };
 
-// Get polls for a session with responses
 exports.getSessionPolls = async (req, res) => {
   try {
     const { sessionCode } = req.params;
@@ -45,12 +43,9 @@ exports.getSessionPolls = async (req, res) => {
     const sessionId = sessionResult.rows[0].id;
 
     const pollsResult = await db.query(
-      `SELECT p.*, 
-        COUNT(DISTINCT r.id) as response_count,
-        json_agg(DISTINCT jsonb_build_object('answer', r.answer, 'participant_name', part.name)) FILTER (WHERE r.id IS NOT NULL) as responses
+      `SELECT p.*, COUNT(DISTINCT r.id) as response_count
        FROM polls p
        LEFT JOIN responses r ON p.id = r.poll_id
-       LEFT JOIN participants part ON r.participant_id = part.id
        WHERE p.session_id = $1
        GROUP BY p.id
        ORDER BY p.created_at DESC`,
@@ -64,7 +59,6 @@ exports.getSessionPolls = async (req, res) => {
   }
 };
 
-// Publish a poll
 exports.publishPoll = async (req, res) => {
   try {
     const { pollId } = req.params;
@@ -90,7 +84,9 @@ exports.publishPoll = async (req, res) => {
       [poll.session_id]
     );
     
-    io.to(`session-${sessionResult.rows[0].code}`).emit('poll-published', poll);
+    const sessionCode = sessionResult.rows[0].code;
+    
+    io.to(`session_${sessionCode}`).emit('new-poll', poll);
     
     res.json(poll);
   } catch (error) {
@@ -99,7 +95,6 @@ exports.publishPoll = async (req, res) => {
   }
 };
 
-// Close a poll
 exports.closePoll = async (req, res) => {
   try {
     const { pollId } = req.params;
@@ -125,7 +120,9 @@ exports.closePoll = async (req, res) => {
       [poll.session_id]
     );
     
-    io.to(`session-${sessionResult.rows[0].code}`).emit('poll-closed', poll);
+    const sessionCode = sessionResult.rows[0].code;
+    
+    io.to(`session_${sessionCode}`).emit('poll-closed', { pollId });
     
     res.json(poll);
   } catch (error) {
@@ -134,7 +131,6 @@ exports.closePoll = async (req, res) => {
   }
 };
 
-// Reopen a closed poll
 exports.reopenPoll = async (req, res) => {
   try {
     const { pollId } = req.params;
@@ -160,7 +156,9 @@ exports.reopenPoll = async (req, res) => {
       [poll.session_id]
     );
     
-    io.to(`session-${sessionResult.rows[0].code}`).emit('poll-reopened', poll);
+    const sessionCode = sessionResult.rows[0].code;
+    
+    io.to(`session_${sessionCode}`).emit('poll-reopened', poll);
     
     res.json(poll);
   } catch (error) {
@@ -169,21 +167,14 @@ exports.reopenPoll = async (req, res) => {
   }
 };
 
-// Get poll results with detailed analytics
 exports.getPollResults = async (req, res) => {
   try {
     const { pollId } = req.params;
     const db = req.app.get('db');
     
     const result = await db.query(
-      `SELECT 
-        p.*,
-        COUNT(DISTINCT r.id) as total_responses,
-        json_agg(jsonb_build_object(
-          'answer', r.answer,
-          'participant_name', part.name,
-          'submitted_at', r.submitted_at
-        )) FILTER (WHERE r.id IS NOT NULL) as responses
+      `SELECT p.*, COUNT(DISTINCT r.id) as total_responses,
+        COALESCE(json_agg(DISTINCT jsonb_build_object('answer', r.answer, 'participant_name', part.name)) FILTER (WHERE r.id IS NOT NULL), '[]') as responses
        FROM polls p
        LEFT JOIN responses r ON p.id = r.poll_id
        LEFT JOIN participants part ON r.participant_id = part.id
@@ -199,7 +190,6 @@ exports.getPollResults = async (req, res) => {
   }
 };
 
-// Submit response to a poll
 exports.submitResponse = async (req, res) => {
   try {
     const { pollId } = req.params;
@@ -230,27 +220,28 @@ exports.submitResponse = async (req, res) => {
       [pollId, participantId, answer]
     );
 
-    // Update total responses count
-    await db.query(
-      'UPDATE polls SET total_responses = total_responses + 1 WHERE id = $1',
+    const participantResult = await db.query(
+      'SELECT name FROM participants WHERE id = $1',
+      [participantId]
+    );
+    
+    const participantName = participantResult.rows[0].name;
+
+    const sessionResult = await db.query(
+      `SELECT s.code, s.host_id 
+       FROM sessions s 
+       JOIN polls p ON p.session_id = s.id 
+       WHERE p.id = $1`,
       [pollId]
     );
+    
+    const sessionCode = sessionResult.rows[0].code;
+    const hostId = sessionResult.rows[0].host_id;
 
-    const results = await db.query(
-      'SELECT answer, COUNT(*) as count FROM responses WHERE poll_id = $1 GROUP BY answer',
-      [pollId]
-    );
-
-    const pollInfo = await db.query(
-      'SELECT p.session_id, s.host_id, s.code FROM polls p JOIN sessions s ON p.session_id = s.id WHERE p.id = $1',
-      [pollId]
-    );
-
-    io.to(`host-${pollInfo.rows[0].host_id}`).emit('response-received', {
+    io.to(`host_${hostId}`).emit('response-received', {
       pollId,
-      response: result.rows[0],
-      results: results.rows,
-      totalResponses: results.rows.reduce((sum, r) => sum + parseInt(r.count), 0)
+      answer,
+      participantName
     });
 
     res.json(result.rows[0]);
