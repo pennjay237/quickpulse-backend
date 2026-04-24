@@ -134,3 +134,63 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+// ============= VIDEO MEETING SIGNALING =============
+// Store video rooms and participants
+const videoRooms = new Map();
+
+io.on('connection', (socket) => {
+  // Existing code...
+
+  // Join video room
+  socket.on('join-video-room', ({ roomId, userId, userName }) => {
+    socket.join(`video_${roomId}`);
+    
+    if (!videoRooms.has(roomId)) {
+      videoRooms.set(roomId, new Map());
+    }
+    
+    const room = videoRooms.get(roomId);
+    room.set(socket.id, { userId, userName });
+    
+    // Notify others
+    socket.to(`video_${roomId}`).emit('user-joined-video', {
+      userId,
+      userName,
+      socketId: socket.id
+    });
+    
+    // Send existing participants to new user
+    const participants = Array.from(room.entries()).map(([id, data]) => ({
+      socketId: id,
+      userId: data.userId,
+      userName: data.userName
+    }));
+    
+    socket.emit('video-room-participants', participants);
+    console.log(`User ${userName} joined video room ${roomId}`);
+  });
+
+  // WebRTC signaling
+  socket.on('video-signal', ({ to, signal, from }) => {
+    io.to(to).emit('video-signal', {
+      signal,
+      from: socket.id
+    });
+  });
+
+  // Leave video room
+  socket.on('leave-video-room', ({ roomId }) => {
+    socket.leave(`video_${roomId}`);
+    
+    if (videoRooms.has(roomId)) {
+      const room = videoRooms.get(roomId);
+      room.delete(socket.id);
+      socket.to(`video_${roomId}`).emit('user-left-video', { socketId: socket.id });
+      
+      if (room.size === 0) {
+        videoRooms.delete(roomId);
+      }
+    }
+  });
+});
